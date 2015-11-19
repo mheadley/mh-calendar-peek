@@ -5,7 +5,9 @@ A simple calendar integration plugin for visually (colorwise) showing how busy y
 To display anywhere in your theme use:
 
 ```php
+
 mh_calendar_peek_plugin_template_display();
+
 ```
 
 Fork it and have fun with it if you like the simplicity and the idea.
@@ -15,5 +17,6 @@ WordPress 3.2+
 (PHP 5.1.6 as well)
 
 ##TODO:
-* make sure I don't cache bad results
-* error cases
+* error cases clearer; tried my best to mitigate those with the cache
+* Repeat rules (this is large)
+* more efficient way to parsing individual event and thus rrule too

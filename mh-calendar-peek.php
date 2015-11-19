@@ -2,14 +2,14 @@
 defined( 'ABSPATH' ) or die( 'No script kiddies please!' );
 /**
  * @package mheadley
- * @version 0.9
+ * @version 0.9.1
  */
 /*
 Plugin Name: MH Calendar Simple Sneak Peek
 Plugin URI: http://mheadley.com
 Description: A simple calendar plugin that will render days of week/month in shades of color based on how busy you are that day.
 Author: Michael Headley
-Version: 1
+Version: 0.9.1
 Author URI: http://mheadley.com
 */
 class mh_calendar_peek_plugin {
@@ -76,9 +76,8 @@ class mh_calendar_peek_plugin {
 	}
 
 	function mh_plugin_section_text() {
-	echo '<p>These are the main sync settings for the MH calendar peek plugin; modify url and cache times here</p>';
+	  echo '<p>These are the main sync settings for the MH calendar peek plugin; modify url and cache times here</p>';
 	}
-
 
 	function mh_plugin_setting_input( $args ) {
     $name = esc_attr( $args['name'] );
@@ -90,20 +89,19 @@ class mh_calendar_peek_plugin {
 		switch ($type){
 			case "select";
 				echo "<select name='$name'>";
-				foreach($range as $value)
-					{
-						if($value == $fvalue || $value['option'] == $fvalue){$selected = 'SELECTED';} else { $selected = '';}
-						if(is_array($value)){
-							echo "<option value=". $value['option'] ." $selected>". $value['label']. "</option> ";
-						}else {
-							echo "<option value='$value' $selected>$value</option> ";
-						}
+				foreach($range as $value){
+					if($value == $fvalue || $value['option'] == $fvalue){$selected = 'SELECTED';} else { $selected = '';}
+					if(is_array($value)){
+						echo "<option value=". $value['option'] ." $selected>". $value['label']. "</option> ";
+					}else {
+						echo "<option value='$value' $selected>$value</option> ";
 					}
+				}
 				echo "</select>";
-				break;
+			break;
 			default;
 				echo "<input type='text' name='$name' value='$fvalue'  size='40'  />";
-				break;
+			break;
 		}
 	}
 
@@ -119,19 +117,26 @@ class mh_calendar_peek_plugin {
 	private function mh_get_calendar_from_endpoint(){
 		$defaults = array('cache_time' => 5);
 		$options = wp_parse_args(get_option('mh_calendar_peek_options'), $defaults);
-		$the_body = "";
-		if ( false === ( $mh_calendar_endpoint_file = get_transient( 'mh_calendar_endpoint_file' ) ) ) {
-			try{
-				$the_body = wp_remote_retrieve_body( wp_remote_get( esc_url_raw( $options['url_string'] ) ));
-			} catch (Exception $e) {
-				return $e->getMessage();
-			}
-			$the_body = str_replace("\r\n", "\n", $the_body);
-			$the_body = str_replace("\n ", "", $the_body);
-			set_transient( 'mh_calendar_endpoint_file', $the_body, $options['cache_time'] * 60 );
-		}
-		return get_transient( 'mh_calendar_endpoint_file' );
-	}
+    $stale_cache = 'stale_cache_mh_calendar_endpoint_file';
+
+		if ( false === ( $the_body = get_transient( 'mh_calendar_endpoint_file' ) ) ) {
+      $response = wp_remote_get(esc_url_raw( $options['url_string'] ));
+      if (is_wp_error($response) || ! isset($response['body']) || 200 != $response['response']['code']) {
+        $the_body = get_option($stale_cache); //if error fetch stale cache from options set when transient was available
+      } else {
+        $the_body =  wp_remote_retrieve_body($response);
+        $the_body = str_replace("\r\n", "\n", $the_body);
+  			$the_body = str_replace("\n ", "", $the_body);
+        if (! get_option($stale_cache)) {
+          add_option($stale_cache, $the_body, '', 'no'); // googled and found this help reduce memory load
+        } else {
+          update_option($stalecachename, $the_body);
+        }
+      }
+      set_transient( 'mh_calendar_endpoint_file', $the_body, $options['cache_time'] * 60 );
+    }
+    return $the_body;
+  }
 
 	function ical_time_to_timestamp($time) {
 	  $hour = substr($time, 9, 2);
@@ -151,87 +156,77 @@ class mh_calendar_peek_plugin {
 
 	function get_day_hours(){
 		$hrs = array();
-		for($i = 0; $i < 24; $i+=1)
-			{
-				$hrs[$i] = array('label'=>"$i:00", 'option'=> $i);
-			}
+		for($i = 0; $i < 24; $i+=1){
+			$hrs[$i] = array('label'=>"$i:00", 'option'=> $i);
+		}
 		return $hrs;
 	}
 
 	private function mh_format_calendar(){
 		global $timezoneString;
 		$calendar_file = $this->mh_get_calendar_from_endpoint();
-		if(!$calendar_file){
-			return "Calendar API Not responding try refreshing";
-		}
 		$icsData = explode("BEGIN:", $calendar_file);
 		 foreach($icsData as $key => $value) {
 			$icsItemsMeta[$key] = explode("\n", $value);
 		 }
 		 foreach($icsItemsMeta as $key => $value) {
-			 foreach($value as $subKey => $subValue) {
-					 if ($subValue != "") {
-							 if ($key != 0 && $subKey == 0) {
-									if (!($subValue == "VCALENDAR" || $subValue == "VEVENT")) {
-										continue 2;
-									}
-		 							$icsDates[$key]["BEGIN"] =  $subValue;
-							 } else {
-									$subValueArr = explode(":", $subValue, 2);
-									if($subValueArr[0] == "DTSTART;VALUE=DATE"){$subValueArr[0] = "DTSTART";}
-									if($subValueArr[0] == "DTEND;VALUE=DATE"){$subValueArr[0] = "DTEND";}
-									switch($subValueArr[0]) {
-									case "DTSTART":
-									case "DTEND":
-										$icsDates[$key][$subValueArr[0]] =  $this->ical_time_to_timestamp($subValueArr[1]);
-										//$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
-										break;
-									case "X-WR-TIMEZONE":
-										try{
-											date_default_timezone_set($subValueArr[1]);
-										}
-										catch(Exception $e){
-											$timezoneString = $subValueArr[1];
-										}
-										$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
-										break;
-									default:
-										/* $icsDates[$key][$subValueArr[0]] = $subValueArr[1]; */
-									 break;
-									}
-							 }
-					 }
-			 }
+  		 foreach($value as $subKey => $subValue) {
+    		 if ($subValue != "") {
+  				 if ($key != 0 && $subKey == 0) {
+  						if (!($subValue == "VCALENDAR" || $subValue == "VEVENT")) {
+  							continue 2;
+  						}
+  							$icsDates[$key]["BEGIN"] =  $subValue;
+  				 } else {
+  						$subValueArr = explode(":", $subValue, 2);
+  						if($subValueArr[0] == "DTSTART;VALUE=DATE"){$subValueArr[0] = "DTSTART";}
+  						if($subValueArr[0] == "DTEND;VALUE=DATE"){$subValueArr[0] = "DTEND";}
+  						switch($subValueArr[0]) {
+  						case "DTSTART":
+  						case "DTEND":
+  							$icsDates[$key][$subValueArr[0]] =  $this->ical_time_to_timestamp($subValueArr[1]);
+  							//$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
+  							break;
+  						case "X-WR-TIMEZONE":
+  							try{
+  								date_default_timezone_set($subValueArr[1]);
+  							}
+  							catch(Exception $e){
+  								$timezoneString = $subValueArr[1];
+  							}
+  							$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
+  							break;
+  						default:
+  							/* $icsDates[$key][$subValueArr[0]] = $subValueArr[1]; */
+  						 break;
+  						}
+  				 }
+    		 }
+  		 }
 		 }
-		 return $icsDates;
+		return $icsDates;
 	}
 	function get_week($today){
-		$defaults = array('start_time' => 9, 'end_time' => 17, 'days_show' => 7, );
+		$defaults = array('start_time' => 9, 'end_time' => 17, 'days_show' => 7 );
 		$options = wp_parse_args(get_option('mh_calendar_peek_options'), $defaults);
 		$ds_hour = intval($options['start_time']);
 		$de_hour = intval($options['end_time']);
 		$days_show = intval($options['days_show']);
 		$days = array();
 		$i = 0;
-		$hour = 3600;
-		$day_start_buffer = 0;
-		$day_end_buffer = 0;
-
 		if($ds_hour == $de_hour){ return false; }
 
 		if($de_hour > $ds_hour){
-			$day_end_buffer = ((24 * 3600) - ($de_hour * 3600)); // total day seconds 60*60*24 - offset 5pm(17*60*60):  86,400 - 61,200
-			$day_start_buffer = $ds_hour * 3600;
-			$full_day = ($de_hour - $ds_hour) * 3600;
+			$day_start_buffer = $ds_hour;
+			$full_day = $de_hour - $ds_hour;
 		}else{
-			$day_end_buffer = ((24 - $ds_hour) * 3600); // total day seconds 60*60*24 - offset 5pm(17*60*60):  86,400 - 61,200
-			$day_start_buffer = (-1 * ((24 - $ds_hour) * 3600));
-			$full_day = ((24 - $ds_hour) + $de_hour) * 3600;
+			$day_start_buffer = (-1 * (24 - $ds_hour));
+			$full_day = ((24 - $ds_hour) + $de_hour);
 		}
 		while ($days_show > $i) {
 			$days[$i] = array(
-				'START' => strtotime("+" . $day_start_buffer/$hour ." hours", $today),
-				'END' => (strtotime("+" . (($full_day / $hour) + ($day_start_buffer / $hour))  . " hours", $today))
+				'START' => strtotime("+" . $day_start_buffer ." hours", $today),
+				'END' => (strtotime("+" . ($day_start_buffer + $full_day)  . " hours", $today))
 			);
 			$today = strtotime("+1 day", $today);
 			$i++;
@@ -252,10 +247,10 @@ class mh_calendar_peek_plugin {
 					//continue;
 				}
 				else {
-					//$busy_week[] = "day start: ". date('l jS \of F Y h:i:s A e', $start) . "| event start: " . date('l jS \of F Y h:i:s A e', $subValue["DTSTART"]). " |day end: ". date('l jS \of F Y h:i:s A e', $end) . "| event end: " . date('l jS \of F Y h:i:s A e', $subValue["DTEND"]) ;
+					//$busy_week[] = "day start: ". date('l jS \of F Y h:i:s A e', $start) . "| event start: " . date('l jS \of F Y h:i:s A e', $subValue["DTSTART"]). " |day end: ". date('l jS \of F Y h:i:s A e', $end) . "| event end: " . date('l jS \of F Y h:i:s A e', $subValue["DTEND"]);
 					$week_events[$key] = $week_events[$key] + $this->get_day_busy(array($subValue["DTSTART"], $subValue["DTEND"]), array($start, $end));
 					//reset to 100 since that's the max
-					if($week_events[$key] > 100 ){ $week_events[$key] = 100;}
+					if($week_events[$key] > 100 ){ $week_events[$key] = 100;} // reset because we don't care if it's outside of 100, you are busy!
 				}
 			}
 		}
@@ -264,7 +259,7 @@ class mh_calendar_peek_plugin {
 	function get_day_busy($event, $day){
 		$busy_meter = 0;
 		$full_day = $day[1] - $day[0];
-		//reset offsets for outside of day
+		//reset offsets for outside of day because it doesn't matter how long it is past the current day ;-)
 		if($event[0] < $day[0]){ $event[0] = $day[0];}
 		if($event[1] > $day[1]){ $event[1] = $day[1];}
 		if (($day[0] >= $event[0]) && ($day[1] <= $event[1]) ) {
@@ -275,14 +270,13 @@ class mh_calendar_peek_plugin {
 		return $busy_meter;
 	}
 	function decorate_days($busyArray){
-
 		$defaults = array('default_start_color' => "6aff51", 'default_end_color' => "ff4216");
 		$options = wp_parse_args(get_option('mh_calendar_peek_options'), $defaults);
 		if(empty($options['start_color'])){$options['start_color'] = $options['default_start_color'];}
 		if(empty($options['end_color'])){$options['end_color'] = $options['default_end_color'];}
 		$theColorBegin = substr($options['start_color'], -6);
 		$theColorEnd = substr($options['end_color'], -6);
-		$html = ""; //. print_r($options);
+		$html = "";
 
 		function gradient($startcol,$endcol,$graduation=100){
 			if($graduation == 100){return $endcol; }
@@ -300,9 +294,9 @@ class mh_calendar_peek_plugin {
 		  return $RetVal;
 		}
 
-		$html .= '<div class="busy-days">';
+		$html .= '<div class="busy-days has-'. count($busyArray) .'days ">';
 		foreach($busyArray as $key => $value){
-			$html .= '<span data-busy="'. $value . '" class="day'.$key.'" style="background-color: #'. gradient($theColorBegin, $theColorEnd, $value) .';">&nbsp;</span>';
+			$html .= '<span data-busy="'. $value . '" class="day'.$key.'" style="background-color: #'. gradient($theColorBegin, $theColorEnd, $value) .';">&nbsp;</span>'; //generate gradient at exact percentage of busy meter quickly
 		}
 		$html .= '</div>';
 		return $html;
@@ -311,13 +305,11 @@ class mh_calendar_peek_plugin {
 		global $timezoneString;
 		$defaults = array('gen_display_error' => "availability not availble sorry. try refreshing page.");
 		$options = wp_parse_args(get_option('mh_calendar_peek_options'), $defaults);
-		//get calendar (and parse)
-		$calendarObj = $this->mh_format_calendar();
+		$calendarObj = $this->mh_format_calendar(); //get calendar (and parse)
 		//check if we got array if not can't parse
 		if(!is_array($calendarObj)){
-			return print_r("<span class='error'>". $options['gen_display_error'] ."</span>");
+			return print_r("<span class='error'>". $calendarObj ."</span>");
 		}
-		//$cal[] = $calendarObj;
 		$week = $this->week_busy($calendarObj);
 		$cal = $this->decorate_days($week);
 		return print_r($cal);
