@@ -2,14 +2,14 @@
 defined( 'ABSPATH' ) or die( 'No script kiddies please!' );
 /**
  * @package mheadley
- * @version 0.9.1
+ * @version 1.0
  */
 /*
 Plugin Name: MH Calendar Simple Sneak Peek
 Plugin URI: http://mheadley.com
 Description: A simple calendar plugin that will render days of week/month in shades of color based on how busy you are that day.
 Author: Michael Headley
-Version: 0.9.1
+Version: 1.0
 Author URI: http://mheadley.com
 */
 class mh_calendar_peek_plugin {
@@ -17,10 +17,15 @@ class mh_calendar_peek_plugin {
 		add_action('admin_init', array($this, 'mh_calendar_peek_admin_init'));
 		add_action( 'admin_menu', array($this, 'mh_calendar_peek_menu' ));
 		add_action( 'mh_calendar_peek_plugin_out', array ( $this, 'mh_parse_calendar_obj' ), 10, 1 );
+    add_action( 'wp_enqueue_scripts', array( $this, 'mh_calendar_peek_plugin_styles' ) );
   }
 	public function mh_calendar_peek_menu() {
 		add_options_page( 'MH Calendar Simple Sneak Peek', 'MH Calendar Options', 'manage_options', 'mh-calendar-peek', array($this, 'mh_calendar_peek_options_page' ));
 	}
+  public function mh_calendar_peek_plugin_styles() {
+    wp_register_style( 'mh-calendar-peek-plugin', plugins_url( 'mh-calendar-peek-plugin/css/mh-calendar-peek.css' ) );
+    wp_enqueue_style( 'mh-calendar-peek-plugin' );
+  }
 	private $timezoneString;
 	private $calendarParentObj;
 	private $errors = array();
@@ -165,6 +170,7 @@ class mh_calendar_peek_plugin {
 	private function mh_format_calendar(){
 		global $timezoneString;
 		$calendar_file = $this->mh_get_calendar_from_endpoint();
+
 		$icsData = explode("BEGIN:", $calendar_file);
 		 foreach($icsData as $key => $value) {
 			$icsItemsMeta[$key] = explode("\n", $value);
@@ -179,26 +185,31 @@ class mh_calendar_peek_plugin {
   							$icsDates[$key]["BEGIN"] =  $subValue;
   				 } else {
   						$subValueArr = explode(":", $subValue, 2);
-  						if($subValueArr[0] == "DTSTART;VALUE=DATE"){$subValueArr[0] = "DTSTART";}
-  						if($subValueArr[0] == "DTEND;VALUE=DATE"){$subValueArr[0] = "DTEND";}
-  						switch($subValueArr[0]) {
-  						case "DTSTART":
-  						case "DTEND":
-  							$icsDates[$key][$subValueArr[0]] =  $this->ical_time_to_timestamp($subValueArr[1]);
-  							//$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
-  							break;
-  						case "X-WR-TIMEZONE":
-  							try{
-  								date_default_timezone_set($subValueArr[1]);
-  							}
-  							catch(Exception $e){
-  								$timezoneString = $subValueArr[1];
-  							}
-  							$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
-  							break;
-  						default:
-  							/* $icsDates[$key][$subValueArr[0]] = $subValueArr[1]; */
-  						 break;
+  						switch(true) {
+    						case ( -1 < strpos($subValueArr[0], "DTSTART")):
+    							$icsDates[$key]["DTSTART"] =  $this->ical_time_to_timestamp($subValueArr[1]);
+                break;
+    						case ( -1 < strpos($subValueArr[0], "DTEND")):
+    							$icsDates[$key]["DTEND"] =  $this->ical_time_to_timestamp($subValueArr[1]);
+    							//$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
+    						break;
+    						case ( -1 < strpos($subValueArr[0], "X-WR-TIMEZONE")):
+    							try{ date_default_timezone_set($subValueArr[1]); }
+    							catch(Exception $e){ $timezoneString = $subValueArr[1]; }
+    							$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
+    						break;
+                case ( -1 < strpos($subValueArr[0], "RRULE")):
+                  $rrulesArr = explode(";", $subValueArr[1]);
+                  $rrules = array();
+                  //messy but readable; go through twice and use identifiers as keys
+                  foreach($rrulesArr as $rsubkey => $rsubvalue) { $rrulesSubArr[$rsubkey] = explode("=", $rsubvalue); }
+                  foreach($rrulesSubArr as $subvalue) { $rrules[$subvalue[0]] = $subvalue[1]; }
+    							$icsDates[$key][$subValueArr[0]] = $rrules;
+    						break;
+    						default:
+    							 //$icsDates[$key][$subValueArr[0]] = $subValueArr[1];
+                   //$icsDates[$key][$subValueArr[0]] = strpos($subValueArr[0], "DTSTART");
+    						break;
   						}
   				 }
     		 }
@@ -233,29 +244,53 @@ class mh_calendar_peek_plugin {
 		}
 		return $days;
 	}
-	function week_busy($events){
-		$start_day = strtotime("today 12:00AM");
-		$days = $this->get_week($start_day);
-		$busy_week = array();
-		$week_events = array();
-		foreach  ($days as $key => $value) {
-			$start = $value["START"];
-			$end = $value["END"];
-			foreach ($events as $subKey => $subValue){
-				$week_events[$key] = $week_events[$key] + 0;
-				if (($start > $subValue["DTEND"]) || ($end < $subValue["DTSTART"]) ) {
-					//continue;
-				}
-				else {
-					//$busy_week[] = "day start: ". date('l jS \of F Y h:i:s A e', $start) . "| event start: " . date('l jS \of F Y h:i:s A e', $subValue["DTSTART"]). " |day end: ". date('l jS \of F Y h:i:s A e', $end) . "| event end: " . date('l jS \of F Y h:i:s A e', $subValue["DTEND"]);
-					$week_events[$key] = $week_events[$key] + $this->get_day_busy(array($subValue["DTSTART"], $subValue["DTEND"]), array($start, $end));
-					//reset to 100 since that's the max
-					if($week_events[$key] > 100 ){ $week_events[$key] = 100;} // reset because we don't care if it's outside of 100, you are busy!
-				}
-			}
-		}
-		return $week_events;
-	}
+  function does_recur_today($day, $event){
+    $defaults = array("INTERVAL" => 1, "COUNT" => 1);
+    $options = wp_parse_args($event["RRULE"], $defaults);
+    $offset_tz = date('Z', $day[0]);
+    $day_start = $day[0];
+    $day_end = $day[1];
+    $event_start = $event["DTSTART"]  - $offset_tz;
+    $event_end = $event["DTEND"]  - $offset_tz;
+    $count = $options["COUNT"] * $options["INTERVAL"];
+    //check if today is before first occurance
+    if($day_end < $event_start){return false;}
+    //check on 1st occurance recurrance as well
+    switch ($options["FREQ"]) {
+      case 'MONTHLY':
+        $modulus = round(($day_start - $event_start)/(28*24*60*60)) % $options["INTERVAL"];
+        $test = ((-1 < strpos($options["BYMONTHDAY"], date('j', $day_start)))? true : false);
+        $mod = "+". $count . " months";
+      break;
+      case 'WEEKLY':
+        $modulus = round(($day_start - $event_start )/(7*24*60*60)) % $options["INTERVAL"];
+        $test = ((-1 < stripos($options["BYDAY"], substr(date('D', $day_start),0, 2)))? true : false);
+        $mod = "+". $count . " weeks";
+      break;
+      case 'YEARLY':
+        $modulus = round(( $day_start - $event_start)/(365*24*60*60)) % $options["INTERVAL"];
+        //gmmktime to blend time with current year hack
+        $event_end_adjusted = gmmktime(date("H", $event_end), date("i", $event_end), date("s", $event_end), date("m", $event_end), date("j", $event_end), date("Y", $day_start ));
+        $test = (($day_start < $event_end_adjusted )? true : false);
+        $mod = "+". $count . " years";
+      break;
+      case 'DAILY':
+        $modulus = round(($day_start - $event_start)/(24*60*60)) % $options["INTERVAL"];
+        $test = true; //today is a day ;-)
+        $mod = "+". $count . " days";
+      break;
+      default:
+        # default nada please note...
+      break;
+    }
+    if(!isset($options["UNTIL"])){ $options["UNTIL"] = strtotime($mod, $event_start); }
+    else { $options["UNTIL"] = $this->ical_time_to_timestamp($options["UNTIL"]); }
+
+    if($test == true && ($day_start < $options["UNTIL"]) ){
+      if($modulus == 0){return true;}
+    }
+    return false;
+  }
 	function get_day_busy($event, $day){
 		$busy_meter = 0;
 		$full_day = $day[1] - $day[0];
@@ -268,6 +303,38 @@ class mh_calendar_peek_plugin {
 			$busy_meter = floor((($event[1] - $event[0])/$full_day) * 100);
 		}
 		return $busy_meter;
+	}
+	function week_busy($events){
+		$start_day = strtotime("today 12:00AM");
+		$days = $this->get_week($start_day);
+		$busy_week = array();
+		$week_events = array();
+		foreach  ($days as $key => $value) {
+			$start = $value["START"];
+			$end = $value["END"];
+			foreach ($events as $subKey => $subValue){
+				$week_events[$key] = $week_events[$key] + 0;
+        if (isset($subValue["RRULE"])) {
+          $offset_tz = date('Z', $subValue["DTSTART"]);
+          //check if recurs
+          if($this->does_recur_today(array($start, $end), $subValue) === true){
+            $week_events[$key] = $week_events[$key] + $this->get_day_busy(array(strtotime(strval(date('h:i A ', $subValue["DTSTART"] - $offset_tz)), $start), strtotime(strval(date('h:i A ', $subValue["DTEND"] - $offset_tz)), $end)), array($start, $end));
+          }
+			  }else{
+          if (($start > $subValue["DTEND"]) || ($end < $subValue["DTSTART"]) ) {
+            //continue;
+          }
+  				else {
+  					$week_events[$key] = $week_events[$key] + $this->get_day_busy(array($subValue["DTSTART"], $subValue["DTEND"]), array($start, $end));
+  				}
+        }
+      //reset to 100 since that's the max
+      if($week_events[$key] > 100 ){ $week_events[$key] = 100;} // reset because we don't care if it's outside of 100, you are busy!
+		}
+  }
+    //$busy_week[] =  $events;
+    //print_r($busy_week);
+		return $week_events;
 	}
 	function decorate_days($busyArray){
 		$defaults = array('default_start_color' => "6aff51", 'default_end_color' => "ff4216");
@@ -303,7 +370,7 @@ class mh_calendar_peek_plugin {
 	}
 	function mh_parse_calendar_obj(){
 		global $timezoneString;
-		$defaults = array('gen_display_error' => "availability not availble sorry. try refreshing page.");
+		$defaults = array('gen_display_error' => "something went wrong please check settings. try refreshing page if all is correct.");
 		$options = wp_parse_args(get_option('mh_calendar_peek_options'), $defaults);
 		$calendarObj = $this->mh_format_calendar(); //get calendar (and parse)
 		//check if we got array if not can't parse

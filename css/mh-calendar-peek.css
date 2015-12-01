@@ -1,0 +1,19 @@
+.busy-days {
+  width: 100%;
+  text-align: justify;
+  white-space: nowrap; }
+  .busy-days span {
+    font-size: 0;
+    height: 10px;
+    display: inline-block;
+    border: 2px solid #FFFFFF; }
+  .busy-days.has-7days span {
+    width: 14.28571%; }
+  .busy-days.has-14days span {
+    width: 7.14286%; }
+  .busy-days.has-5days span {
+    width: 20%; }
+  .busy-days.has-28days span {
+    width: 3.57143%; }
+
+/*# sourceMappingURL=mh-calendar-peek.css.map */
