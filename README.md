@@ -12,7 +12,7 @@ mh_calendar_peek_plugin_template_display();
 
 Screenshot
 ----------
-![Screen shot](/images/screenshot.png?raw=true "Screen Shot")
+![Screen shot](/../images/screenshot.png?raw=true "Screen Shot")
 
 Fork it and have fun with it if you like the simplicity and the idea.
 
