@@ -2,14 +2,14 @@
 defined( 'ABSPATH' ) or die( 'No script kiddies please!' );
 /**
  * @package mheadley
- * @version 1.0
+ * @version 1.05
  */
 /*
 Plugin Name: MH Calendar Simple Sneak Peek
 Plugin URI: http://mheadley.com
 Description: A simple calendar plugin that will render days of week/month in shades of color based on how busy you are that day.
 Author: Michael Headley
-Version: 1.0
+Version: 1.05
 Author URI: http://mheadley.com
 */
 class mh_calendar_peek_plugin {
@@ -23,7 +23,7 @@ class mh_calendar_peek_plugin {
 		add_options_page( 'MH Calendar Simple Sneak Peek', 'MH Calendar Options', 'manage_options', 'mh-calendar-peek', array($this, 'mh_calendar_peek_options_page' ));
 	}
   public function mh_calendar_peek_plugin_styles() {
-    wp_register_style( 'mh-calendar-peek-plugin', plugins_url( 'mh-calendar-peek-plugin/css/mh-calendar-peek.css' ) );
+    wp_register_style( 'mh-calendar-peek-plugin', plugins_url( 'mh-calendar-peek/css/mh-calendar-peek.css' ) );
     wp_enqueue_style( 'mh-calendar-peek-plugin' );
   }
 	private $timezoneString;
@@ -169,8 +169,7 @@ class mh_calendar_peek_plugin {
 
 	private function mh_format_calendar(){
 		global $timezoneString;
-		$calendar_file = $this->mh_get_calendar_from_endpoint();
-
+    $calendar_file = $this->mh_get_calendar_from_endpoint();
 		$icsData = explode("BEGIN:", $calendar_file);
 		 foreach($icsData as $key => $value) {
 			$icsItemsMeta[$key] = explode("\n", $value);
@@ -268,10 +267,12 @@ class mh_calendar_peek_plugin {
         $mod = "+". $count . " weeks";
       break;
       case 'YEARLY':
-        $modulus = round(( $day_start - $event_start)/(365*24*60*60)) % $options["INTERVAL"];
+        $modulus = round(date("Y", $day_start ) - date("Y", $event_start )) % $options["INTERVAL"];
         //gmmktime to blend time with current year hack
-        $event_end_adjusted = gmmktime(date("H", $event_end), date("i", $event_end), date("s", $event_end), date("m", $event_end), date("j", $event_end), date("Y", $day_start ));
-        $test = (($day_start < $event_end_adjusted )? true : false);
+        $event_start_adjusted = gmmktime(date("H", $event_start), date("i", $event_start), date("s", $event_start), date("m", $event_start), date("j", $event_start), date("Y", $day_start )) - $offset_tz;
+        $event_end_adjusted = gmmktime(date("H", $event_end), date("i", $event_end), date("s", $event_end), date("m", $event_end), date("j", $event_end), date("Y", $day_start )) - $offset_tz;
+
+        $test = (( (($day_start <= $event_end_adjusted) && ($day_start >= $event_start_adjusted)) || ((($event_end_adjusted - $event_start_adjusted) < 0 )&&($day_start <= $event_end_adjusted)) || ((($event_end_adjusted - $event_start_adjusted) < 0 )&&($day_start >= $event_start_adjusted)) ) ? true : false);
         $mod = "+". $count . " years";
       break;
       case 'DAILY':
@@ -328,12 +329,11 @@ class mh_calendar_peek_plugin {
   					$week_events[$key] = $week_events[$key] + $this->get_day_busy(array($subValue["DTSTART"], $subValue["DTEND"]), array($start, $end));
   				}
         }
+
       //reset to 100 since that's the max
       if($week_events[$key] > 100 ){ $week_events[$key] = 100;} // reset because we don't care if it's outside of 100, you are busy!
 		}
   }
-    //$busy_week[] =  $events;
-    //print_r($busy_week);
 		return $week_events;
 	}
 	function decorate_days($busyArray){
@@ -375,15 +375,15 @@ class mh_calendar_peek_plugin {
 		$calendarObj = $this->mh_format_calendar(); //get calendar (and parse)
 		//check if we got array if not can't parse
 		if(!is_array($calendarObj)){
-			return print_r("<span class='error'>". $calendarObj ."</span>");
+		 print_r("<span class='error'>". $calendarObj ."</span>");
 		}
 		$week = $this->week_busy($calendarObj);
 		$cal = $this->decorate_days($week);
-		return print_r($cal);
+    echo $cal;
 	}
 }
-new mh_calendar_peek_plugin();
+$mh_calendar_peek_plugin = new mh_calendar_peek_plugin();
 function mh_calendar_peek_plugin_template_display(){
-	do_action( 'mh_calendar_peek_plugin_out', 50 );
+ do_action( 'mh_calendar_peek_plugin_out', 50);
 }
 ?>
